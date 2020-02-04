@@ -63,7 +63,6 @@ We load the required R packages.
 ## Setup
 
 # Load the required packages into the R session.
-
 library(rattle)       # Use normVarNames().
 library(readr)        # Fast read csv file.
 library(plyr)         # Wrangling.
@@ -124,19 +123,17 @@ names(demog) %<>% normVarNames() %T>% print()
 
 # Normalize categoric variables.
 
-txn %>% 
+txnc <- txn %>% 
   sapply(is.character) %>%
   which() %>%
   names() %T>%
-  print() ->
-txnc
+  print()
 
-demog %>% 
+demc <- demog %>% 
   sapply(is.character) %>%
   which() %>%
   names() %T>%
-  print() ->
-demc
+  print()
 
 txn[txnc]   %<>% sapply(normVarNames)
 demog[demc] %<>% sapply(normVarNames)
@@ -160,6 +157,9 @@ dim(txn) %>% comma() %>% cat("\n")
 glimpse(txn)
 
 # Review observations.
+
+colSums(is.na(txn))
+
 
 head(txn) %>% print.data.frame()
 ```
@@ -189,13 +189,34 @@ txn %>%
   arrange(desc(n)) %>%
   head(n=10) %>%
   ggplot(aes(x=account_id, y=n)) +
-  geom_bar(stat="identity", position="dodge", fill="lightblue") +
+  geom_bar(stat="identity", position="dodge", fill="tan1") +
   labs(x       = "Account ID",
        y       = "Transaction Frequency (Purchase)",
        title   = "Top 10 Accounts with the Higest Transaction Frequency",
        caption = "Source: " %s+% "Transaction") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
+
+1.b. The transaction amounts of each account varies. The following
+plot shows the top 10 accounts with the highest transaction amounts.
+
+```{r}
+txn %>%
+  filter(transaction_type == "p") %>%
+  group_by(account_id) %>%
+  summarise(transaction_amount_usd = sum(transaction_amount_usd)) %>%
+  arrange(desc(transaction_amount_usd)) %>%
+  head(n=10) %>%
+  ggplot(aes(x=account_id, y=transaction_amount_usd)) +
+  geom_bar(stat="identity", position="dodge", fill="turquoise3") +
+  labs(x       = "Account ID",
+       y       = "Transaction Amount in USD",
+       title   = "Top 10 Accounts with the Higest Transaction Amount",
+       caption = "Source: " %s+% "Transaction") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
 
 2. The total transaction amount made by different types of credit
 cards vary across merchant industry, and this can be plotted as shown
@@ -234,9 +255,17 @@ dim(demog) %>% comma() %>% cat("\n")
 
 glimpse(demog)
 
+library(Hmisc)
+Hmisc::describe(demog)
+summary(demog)
+
+ftable(c(demog$sex,demog$marital_status))
+ftable(demog$education)
 # Review observations.
 
 head(demog) %>% print.data.frame() 
+
+
 ```
 
 The demographic data set contains `r nrow(demog) %>% comma()` records
@@ -278,7 +307,7 @@ demog %>%
 demog %>%
   filter(sex == "male" & marital_status == "single") %>%
   ggplot(aes(x=factor(education), y=credit_limit, color=factor(bad_flag))) +
-  geom_boxplot() +
+  geom_violin(trim = FALSE) +
   scale_fill_discrete(guide=guide_legend(title="Bad Flag")) +
   labs(x="Education Level",
        y="Credit Limit",
@@ -287,6 +316,7 @@ demog %>%
        caption="Source: " %s+% "Demographic") +
  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
+
 
 #### 2.4.2 Data Aggregation
 
@@ -358,7 +388,7 @@ recentInterval <- function(startdate, enddate, ts)
 
 # Aggregate transaction data per account level.
 
-txn %>%
+rollup <- txn %>%
     filter(transaction_type == "p") %>%
     group_by(account_id) %>%
     arrange(account_id, transaction_date) %>%
@@ -384,8 +414,8 @@ txn %>%
               last_pur_time_6    = recentInterval(min(transaction_date),
                                                   max(transaction_date),
                                                   transaction_date)
-              ) ->
-rollup
+              )
+
 
 # Review aggregated data.
 
@@ -411,6 +441,9 @@ their common key, account id.
 merged <- merge(rollup, demog, by=c("account_id"))
 
 glimpse(merged)
+
+
+head(merged,100)
 ```
 
 #### 2.4.4 Data Cleansing
@@ -444,14 +477,12 @@ ignore <- id %T>% print()
 
 # Identify variables with only missing values.
 
-merged[vars] %>%
+missing <- merged[vars] %>%
   sapply(function(x) x %>% is.na %>% sum) %>%
   equals(nrow(merged)) %>%
   which() %>%
   names() %T>%
-  print() ->
-missing
-
+  print()
 # Add them if any to the variables to be ignored for modelling.
 
 ignore <- union(ignore, missing) %T>% print()
@@ -484,40 +515,36 @@ merged[vars] %>%  is.na() %>% sum()
 
 # Identify variables with some missing values but not too much.
 
-merged[vars] %>%
+some <- merged[vars] %>%
   sapply(function(x) x %>% is.na %>% sum) %>%
   '>' (0) %>%
   which() %>%
   names() %T>%
-  print() ->
-some
+  print()
 
 merged[some] %>% lapply(class) %>% print()
 
 # Identify categorical variables with some missing values.
 
-merged[some] %>%
+some.catc <- merged[some] %>%
   sapply(is.character) %>%
   which(useNames=TRUE) %>%
   names() %T>% 
-  print() ->
-some.catc
+  print() 
 
 # Identify numeric variables with some missing values.
 
-merged[some] %>%
+some.numc <- merged[some] %>%
   sapply(is.numeric) %>%
   which(useNames=TRUE) %>%
   names() %T>% 
-  print() ->
-some.numc
+  print()
 
 # Compute the mode of each categorical variables.
 
-merged[some.catc] %>% 
+counts.table <- merged[some.catc] %>% 
   lapply(table) %>% 
-  print() ->
-counts.table
+  print() 
 
 some.catc.mode <- unlist(lapply(counts.table,
                                 FUN=function(x){as.character(names(x[which.max(x)]))}),
@@ -525,11 +552,10 @@ some.catc.mode <- unlist(lapply(counts.table,
 
 # Compute the mean of each numeric variables.
 
-merged[some.numc] %>%
+some.numc.mean <- merged[some.numc] %>%
   lapply(mean, na.rm=TRUE) %>%
   unlist(use.names=F) %>%
-  print() ->
-some.numc.mean
+  print()
 
 # Define a function to replace missing values with mean or mode. 
 
@@ -574,12 +600,11 @@ merged[vars] %>%  is.na() %>% sum()
 
 # Identify variables that have a single value.
 
-merged[vars] %>%
+constants <- merged[vars] %>%
   sapply(function(x) all(x == x[1L])) %>%
   which() %>%
   names() %T>%
-  print() ->
-constants
+  print()
 
 # Add them to the variable to be ignored.
 
@@ -591,18 +616,17 @@ ignore <- union(ignore, constants) %>% print()
 
 # Note which variables are numeric.
 
-vars %>%
+numc <- vars %>%
   setdiff(ignore) %>%
   '['(merged, .) %>%
   sapply(is.numeric) %>% 
   which() %>%
   names() %T>%
-  print() ->
-numc
+  print()
 
 # For the numeric variables generate a table of correlations
 
-merged[numc] %>%
+mc <- merged[numc] %>%
   cor(use="complete.obs") %>%
   ifelse(upper.tri(., diag=TRUE), NA, .) %>% 
   abs %>% 
@@ -613,8 +637,7 @@ merged[numc] %>%
   gather(var2, cor, -var1) %>% 
   na.omit %>%
   arrange(-abs(cor)) %T>%
-  print() ->
-mc
+  print()
 
 # Add variables with collinearity to the variable to be ignored.
 
@@ -634,11 +657,10 @@ length(vars)
 
 # Convert all categorical variables into factor.
 
-merged %>% 
+catc <- merged %>% 
   sapply(is.character) %>%
   which(useNames=TRUE) %>%
-  names() ->
-catc
+  names()
   
 merged[catc] %<>% lapply(factor)
 
@@ -647,7 +669,7 @@ merged[catc] %<>% lapply(factor)
 processed <- merged[c(id, vars)]
 
 glimpse(processed)
-
+head(processed,100)
 # Export the merged and cleansed data.
 
 write.csv(processed, file=file.path(wd, dpath, "processedSimu.csv"), row.names=FALSE)
@@ -700,12 +722,11 @@ vars <- names(processed)
 
 # Identify numeric variables used for binning.
 
-processed %>%
+vars_fe <- processed %>%
   sapply(is.numeric) %>%
   which(useNames=TRUE) %>%
   names() %T>% 
-  print() ->
-vars_fe
+  print()
 
 # Compute quantiles with an even split of 10% for numeric variables. 
 
@@ -791,15 +812,16 @@ binned <- binned[vars]
 
 # Convert all categorical variables into factor.
 
-binned %>% 
+catc <- binned %>% 
   sapply(is.character) %>%
   which(useNames=TRUE) %>%
-  names() ->
-catc
+  names()
   
 binned[catc] %<>% lapply(factor)
 
 glimpse(binned)
+
+head(binned,100)
 
 # Export the result.
 
